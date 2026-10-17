@@ -166,9 +166,26 @@ jp send_chip
 
 check_pal:
 cmp r3,#1 // Check if PAL
-jp nz, send_chip
+jp nz, check_sa1
 // It's PAL
 ld r8,#2
+core r8
+jp send_chip
+
+// SA1 and CX4 don't fit alongside save states in the main core, so they get their own
+check_sa1:
+cmp r4,#0x60 // Check if SA1
+jp nz, check_cx4
+log_string("Using SA1")
+ld r8,#3
+core r8
+jp send_chip
+
+check_cx4:
+cmp r4,#0x40 // Check if CX4
+jp nz, send_chip
+log_string("Using CX4")
+ld r8,#4
 core r8
 
 send_chip:

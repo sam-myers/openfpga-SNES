@@ -23,7 +23,7 @@ jobs:
       matrix:
         # core: ["main", "pal", "spc", "sa1gsu", "pal_sa1gsu"]
         # TODO: Add SA1/GSU cores
-        core: ["main", "pal", "spc"]
+        core: ["main", "pal", "spc", "sa1", "cx4"]
       fail-fast: false
 
     steps:
@@ -68,6 +68,12 @@ jobs:
                       ;;
                   spc)
                       echo "ntsc_spc"
+                      ;;
+                  sa1)
+                      echo "ntsc_sa1"
+                      ;;
+                  cx4)
+                      echo "ntsc_cx4"
                       ;;
                   sa1gsu)
                       echo "ntsc_sa1gsu"
@@ -125,6 +131,8 @@ jobs:
     steps:
       - name: "🧰 Checkout Repository"
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: "🧰 Checkout Packybara"
         uses: actions/checkout@v4
@@ -136,6 +144,31 @@ jobs:
         run: |
           pip3 install -r .github/publish/requirements.txt
           python3 .github/publish/create_folders.py
+
+      - name: "🧩 Assemble loader"
+        shell: bash
+        run: |
+          git clone https://github.com/ARM9/bass.git "$RUNNER_TEMP/bass"
+          git -C "$RUNNER_TEMP/bass" checkout c3962ec01f4768be1667db0d09c12141c28241f3
+          BASS_CXX="g++ -include stdexcept -include limits -include cstdint"
+          make -C "$RUNNER_TEMP/bass/bass" -j"$(nproc)" compiler="$BASS_CXX"
+          git clone https://github.com/open-fpga/bass-chip32.git "$RUNNER_TEMP/bass-chip32"
+          git -C "$RUNNER_TEMP/bass-chip32" checkout 9e4a919d1ff39b217b75e090e996148654d3f9d7
+          mkdir -p "$HOME/.local/share/bass/architectures"
+          cp -R "$RUNNER_TEMP/bass/bass/data/architectures/." "$RUNNER_TEMP/bass-chip32/architectures/." "$HOME/.local/share/bass/architectures/"
+          BASS="$RUNNER_TEMP/bass/bass/out/bass"
+
+          # Sanity check the toolchain: upstream's loader.asm must reproduce upstream's loader.bin
+          mkdir "$RUNNER_TEMP/upstream_loader"
+          for f in loader.asm check_header.asm util.asm; do
+            git show 1a08c84ddef760bedd30a376114fc2e97527df19:support/$f > "$RUNNER_TEMP/upstream_loader/$f"
+          done
+          (cd "$RUNNER_TEMP/upstream_loader" && "$BASS" loader.asm)
+          git show 1a08c84ddef760bedd30a376114fc2e97527df19:pkg/pocket/Cores/agg23.SNES/loader.bin > "$RUNNER_TEMP/upstream_loader/expected.bin"
+          cmp "$RUNNER_TEMP/upstream_loader/loader.bin" "$RUNNER_TEMP/upstream_loader/expected.bin"
+
+          (cd support && "$BASS" loader.asm)
+          cp support/loader.bin staging/Cores/agg23.SNES/loader.bin
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
