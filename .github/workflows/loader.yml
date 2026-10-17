@@ -22,6 +22,10 @@ jobs:
           git -C "$RUNNER_TEMP/bass" checkout c3962ec01f4768be1667db0d09c12141c28241f3
           make -C "$RUNNER_TEMP/bass/bass" -j"$(nproc)" compiler="g++ -include stdexcept -include limits -include cstdint"
           git clone https://github.com/open-fpga/bass-chip32.git "$RUNNER_TEMP/bass-chip32"
+          # The 32-bit immediate forms are declared #*16, so newer bass can pick them for small values.
+          # Declare them #*32 so 16-bit values get the short encoding, as in upstream's loader.bin
+          sed -i -E '/~b >>16b$/ s/#\*16/#*32/' "$RUNNER_TEMP/bass-chip32/architectures/chip32.vm.arch"
+          grep -n '#\*32' "$RUNNER_TEMP/bass-chip32/architectures/chip32.vm.arch"
           mkdir -p "$HOME/.local/share/bass/architectures"
           cp -R "$RUNNER_TEMP/bass/bass/data/architectures/." "$RUNNER_TEMP/bass-chip32/architectures/." "$HOME/.local/share/bass/architectures/"
           git -C "$RUNNER_TEMP/bass-chip32" log --oneline | head -5
