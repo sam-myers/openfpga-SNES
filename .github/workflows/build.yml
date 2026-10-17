@@ -148,14 +148,14 @@ jobs:
       - name: "🧩 Assemble loader"
         shell: bash
         run: |
+          # bass-chip32 specifies bass devel (v19), which loads architectures from beside its binary
           git clone https://github.com/ARM9/bass.git "$RUNNER_TEMP/bass"
-          git -C "$RUNNER_TEMP/bass" checkout c3962ec01f4768be1667db0d09c12141c28241f3
-          BASS_CXX="g++ -include stdexcept -include limits -include cstdint"
-          make -C "$RUNNER_TEMP/bass/bass" -j"$(nproc)" compiler="$BASS_CXX"
+          git -C "$RUNNER_TEMP/bass" checkout 9ec2ecc2ed4615d88c1615d9550b6715478c5d34
+          make -C "$RUNNER_TEMP/bass/bass" -j"$(nproc)" compiler="g++ -include stdexcept -include limits -include cstdint"
           git clone https://github.com/open-fpga/bass-chip32.git "$RUNNER_TEMP/bass-chip32"
           git -C "$RUNNER_TEMP/bass-chip32" checkout 9e4a919d1ff39b217b75e090e996148654d3f9d7
-          mkdir -p "$HOME/.local/share/bass/architectures"
-          cp -R "$RUNNER_TEMP/bass/bass/data/architectures/." "$RUNNER_TEMP/bass-chip32/architectures/." "$HOME/.local/share/bass/architectures/"
+          mkdir -p "$RUNNER_TEMP/bass/bass/out/architectures"
+          cp -R "$RUNNER_TEMP/bass/bass/data/architectures/." "$RUNNER_TEMP/bass-chip32/architectures/." "$RUNNER_TEMP/bass/bass/out/architectures/"
           BASS="$RUNNER_TEMP/bass/bass/out/bass"
 
           # Sanity check the toolchain: upstream's loader.asm must reproduce upstream's loader.bin
