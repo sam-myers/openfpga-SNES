@@ -1,0 +1,48 @@
+name: Loader
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - savestates
+    paths:
+      - "support/*.asm"
+      - ".github/workflows/loader.yml"
+
+jobs:
+  loader:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build bass
+        run: |
+          git clone https://github.com/ARM9/bass.git "$RUNNER_TEMP/bass"
+          git -C "$RUNNER_TEMP/bass" checkout c3962ec01f4768be1667db0d09c12141c28241f3
+          make -C "$RUNNER_TEMP/bass/bass" -j"$(nproc)" compiler="g++ -include stdexcept -include limits -include cstdint"
+          git clone https://github.com/open-fpga/bass-chip32.git "$RUNNER_TEMP/bass-chip32"
+          mkdir -p "$HOME/.local/share/bass/architectures"
+          cp -R "$RUNNER_TEMP/bass/bass/data/architectures/." "$RUNNER_TEMP/bass-chip32/architectures/." "$HOME/.local/share/bass/architectures/"
+          git -C "$RUNNER_TEMP/bass-chip32" log --oneline | head -5
+          cat "$RUNNER_TEMP/bass-chip32/README.md"
+
+      - name: Assemble
+        run: |
+          BASS="$RUNNER_TEMP/bass/bass/out/bass"
+          mkdir -p out/upstream
+          for f in loader.asm check_header.asm util.asm; do
+            git show 1a08c84ddef760bedd30a376114fc2e97527df19:support/$f > out/upstream/$f
+          done
+          git show 1a08c84ddef760bedd30a376114fc2e97527df19:pkg/pocket/Cores/agg23.SNES/loader.bin > out/expected.bin
+          (cd out/upstream && "$BASS" loader.asm) || true
+          (cd support && "$BASS" loader.asm && cp loader.bin ../out/new.bin) || true
+          ls -l out out/upstream
+          echo "--- expected"; xxd out/expected.bin | head -20
+          echo "--- upstream rebuilt"; xxd out/upstream/loader.bin | head -20
+          cmp -l out/expected.bin out/upstream/loader.bin | head -40 || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loader
+          path: out/
