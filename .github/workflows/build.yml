@@ -43,6 +43,7 @@ jobs:
           git -C "$RUNNER_TEMP/bass" checkout c3962ec01f4768be1667db0d09c12141c28241f3
           # nall predates GCC 13's header cleanup
           BASS_CXX="g++ -include stdexcept -include limits -include cstdint"
+          mkdir -p "$HOME/.local/bin"
           make -C "$RUNNER_TEMP/bass/bass" -j"$(nproc)" compiler="$BASS_CXX"
           make -C "$RUNNER_TEMP/bass/bass" install compiler="$BASS_CXX" prefix="$HOME/.local"
 
