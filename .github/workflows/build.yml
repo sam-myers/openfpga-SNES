@@ -10,6 +10,7 @@ on:
   push:
     branches:
       - master
+      - savestates
   pull_request:
 
 permissions:
