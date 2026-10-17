@@ -25,6 +25,8 @@ jobs:
           git clone https://github.com/open-fpga/bass-chip32.git "$RUNNER_TEMP/bass-chip32"
           mkdir -p "$HOME/.local/share/bass/architectures"
           cp -R "$RUNNER_TEMP/bass/bass/data/architectures/." "$RUNNER_TEMP/bass-chip32/architectures/." "$HOME/.local/share/bass/architectures/"
+          mkdir -p "$RUNNER_TEMP/bass/bass/out/architectures"
+          cp -R "$RUNNER_TEMP/bass/bass/data/architectures/." "$RUNNER_TEMP/bass-chip32/architectures/." "$RUNNER_TEMP/bass/bass/out/architectures/"
           git -C "$RUNNER_TEMP/bass-chip32" log --oneline | head -5
           cat "$RUNNER_TEMP/bass-chip32/README.md"
 
