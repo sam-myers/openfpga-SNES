@@ -141,6 +141,8 @@ module main #(
 	input             SS_LOAD,
 	input       [1:0] SS_SLOT,
 	output            SS_AVAIL,
+	// Pocket: exposes the savestate engine's busy flag so the APF side can tell when a save/load finishes
+	output            SS_BUSY_OUT,
 
 	input      [63:0] SS_DDR_DI,
 	input             SS_DDR_ACK,
@@ -1034,6 +1036,8 @@ end else begin
 	assign SS_BUSY = 0;
 end
 endgenerate
+
+assign SS_BUSY_OUT = SS_BUSY;
 
 assign SS_AVAIL = ~|{ROM_TYPE[7:4]} | MAP_ACTIVE[3] | (ROM_TYPE[7:6] == 2'b10) | MAP_ACTIVE[2] | MAP_ACTIVE[0]; // Basic carts + SA1 + DSPn + GSU + CX4
 

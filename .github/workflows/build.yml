@@ -35,6 +35,22 @@ jobs:
           repository: "agg23/pocketpublish"
           path: ".github/publish"
 
+      - name: "🧰 Build bass assembler"
+        shell: bash
+        run: |
+          git clone https://github.com/ARM9/bass.git "$RUNNER_TEMP/bass"
+          git -C "$RUNNER_TEMP/bass" checkout c3962ec01f4768be1667db0d09c12141c28241f3
+          make -C "$RUNNER_TEMP/bass/bass" -j"$(nproc)"
+          make -C "$RUNNER_TEMP/bass/bass" install prefix="$HOME/.local"
+
+      - name: "🧩 Assemble savestate routine"
+        shell: bash
+        run: |
+          cd support/savestates
+          "$HOME/.local/bin/bass" savestates.asm
+          ls -l savestates.bin
+          python3 ../gen_ss_rom.py savestates.bin ../../rtl/mister_top/ss_rom.sv
+
       - name: "🏗️ Compile design"
         shell: bash
         run: |
@@ -65,6 +81,17 @@ jobs:
           cmd="docker run --rm -v ${{ github.workspace }}:/build raetro/quartus:21.1 quartus_sh -t generate.tcl $build_type"
           echo "Running command: $cmd"
           eval $cmd
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports_${{ matrix.core }}
+          path: |
+            projects/output_files/*.summary
+            projects/output_files/*.fit.rpt
+            projects/output_files/*.sta.rpt
+          if-no-files-found: ignore
 
       - name: Upload failure artifact
         uses: actions/upload-artifact@v4
@@ -114,11 +141,8 @@ jobs:
 
       - name: "Release"
         run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            python3 .github/publish/release.py --norelease
-          else
-            python3 .github/publish/release.py
-          fi
+          # Save state fork: never publish a GitHub release, the zip is uploaded as an Actions artifact below
+          python3 .github/publish/release.py --norelease
 
       - name: "Upload Actions artifact"
         uses: actions/upload-artifact@v4

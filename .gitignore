@@ -75,3 +75,4 @@ cr_ie_info.json
 # ROMS Checklist
 !checklist.sha1
 !checklist.md5
+rtl/mister_top/ss_rom.sv

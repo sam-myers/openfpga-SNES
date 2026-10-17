@@ -95,6 +95,22 @@ module MAIN_SNES (
 
     output reg [3:0] sram_size,
 
+    // Save states
+    // Levels, synchronized internally. Rising edge starts a save/load
+    input wire ss_save,
+    input wire ss_load,
+    // clk_sys
+    output wire ss_busy,
+    output wire ss_supported,
+
+    // Save state buffer host port (clk_mem)
+    input wire ss_host_req,
+    input wire ss_host_we,
+    input wire [19:1] ss_host_addr,
+    input wire [15:0] ss_host_din,
+    output wire [15:0] ss_host_dout,
+    output wire ss_host_ack,
+
     // SDRAM
     output wire [12:0] dram_a,
     output wire [ 1:0] dram_ba,
@@ -317,6 +333,25 @@ module MAIN_SNES (
   wire [7:0] G;
   wire [7:0] B;
 
+  reg [2:0] ss_save_s = 0;
+  reg [2:0] ss_load_s = 0;
+
+  always @(posedge clk_sys) begin
+    ss_save_s <= {ss_save_s[1:0], ss_save};
+    ss_load_s <= {ss_load_s[1:0], ss_load};
+  end
+
+  wire ss_avail;
+  assign ss_supported = USE_SS && ss_avail;
+
+  wire [63:0] ss_ddr_di;
+  wire ss_ddr_ack;
+  wire [63:0] ss_ddr_do;
+  wire [21:3] ss_ddr_addr;
+  wire ss_ddr_we;
+  wire [7:0] ss_ddr_be;
+  wire ss_ddr_req;
+
   main #(
       .USE_CX4(USE_CX4),
       .USE_SDD1(USE_SDD1),
@@ -448,18 +483,20 @@ module MAIN_SNES (
       .AUDIO_R(audio_r),
 
       // New upstream ports since fork — tied to safe defaults
-      .RAM_SIZE(4'b0),
+      // Save states read this to know how much BSRAM to snapshot
+      .RAM_SIZE(sram_size),
       .GSU_FASTROM(1'b0),
       .SUFAMI_SWAP(1'b0),
       .CC_DIP(8'b0),
       .DSP_FREQ(1'b0),
       .MSU_AUDIO_SECTOR(22'b0),
-      .SS_SAVE(1'b0),
-      .SS_TOSD(1'b0),
-      .SS_LOAD(1'b0),
+      .SS_SAVE(ss_save_s[2]),
+      // Write the full header (including save count), as MiSTer does when saving to SD
+      .SS_TOSD(1'b1),
+      .SS_LOAD(ss_load_s[2]),
       .SS_SLOT(2'b0),
-      .SS_DDR_DI(64'b0),
-      .SS_DDR_ACK(1'b0),
+      .SS_DDR_DI(ss_ddr_di),
+      .SS_DDR_ACK(ss_ddr_ack),
 
       // Outputs — unconnected
       .SYSCLKR_CE(),
@@ -469,12 +506,51 @@ module MAIN_SNES (
       .SNI_JOY(),
       .MSU_AUDIO_RESUME(),
       .MSU_RESUME_SECTOR(),
-      .SS_AVAIL(),
-      .SS_DDR_DO(),
-      .SS_DDR_ADDR(),
-      .SS_DDR_WE(),
-      .SS_DDR_BE(),
-      .SS_DDR_REQ()
+      .SS_AVAIL(ss_avail),
+      .SS_BUSY_OUT(ss_busy),
+      .SS_DDR_DO(ss_ddr_do),
+      .SS_DDR_ADDR(ss_ddr_addr),
+      .SS_DDR_WE(ss_ddr_we),
+      .SS_DDR_BE(ss_ddr_be),
+      .SS_DDR_REQ(ss_ddr_req)
+  );
+
+  ////////////////////////////  SAVE STATES  ///////////////////////////////////
+
+  wire [24:0] ss_sni_addr;
+  wire [15:0] ss_sni_din;
+  wire [15:0] ss_sni_dout;
+  wire ss_sni_word;
+  wire ss_sni_rd_req;
+  wire ss_sni_wr_req;
+  wire ss_sni_ready;
+
+  ss_buffer ss_buffer (
+      .clk_sys(clk_sys),
+      .clk_mem(clk_mem),
+
+      .ddr_req(ss_ddr_req),
+      .ddr_we (ss_ddr_we),
+      .ddr_addr(ss_ddr_addr),
+      .ddr_do(ss_ddr_do),
+      .ddr_be(ss_ddr_be),
+      .ddr_ack(ss_ddr_ack),
+      .ddr_di(ss_ddr_di),
+
+      .host_req(ss_host_req),
+      .host_we(ss_host_we),
+      .host_addr(ss_host_addr),
+      .host_din(ss_host_din),
+      .host_dout(ss_host_dout),
+      .host_ack(ss_host_ack),
+
+      .sni_addr(ss_sni_addr),
+      .sni_din(ss_sni_din),
+      .sni_word(ss_sni_word),
+      .sni_rd_req(ss_sni_rd_req),
+      .sni_wr_req(ss_sni_wr_req),
+      .sni_dout(ss_sni_dout),
+      .sni_ready(ss_sni_ready)
   );
 
   wire reset = core_reset | cart_download | spc_download | bk_loading | clearing_ram | msu_data_download | parser_delay != 0;
@@ -542,6 +618,29 @@ module MAIN_SNES (
   wire ROM_WORD;
   wire [15:0] ROM_D;
   wire [15:0] ROM_Q;
+  wire [15:0] sdram_rom_q;
+
+  generate
+    if (USE_SS) begin : gen_ss_rom
+      // The savestate engine runs its 65816 save/load routine (savestates.asm) out of ROM bank $FF.
+      // MiSTer loads that routine into SDRAM; here it's baked into block RAM instead.
+      // Mapped carts are masked to their ROM size, so bank $FF is otherwise never addressed
+      wire [15:0] ss_rom_q;
+
+      ss_rom ss_rom (
+          .clk (clk_mem),
+          .addr(ROM_ADDR[15:1]),
+          .q   (ss_rom_q)
+      );
+
+      // Mimic SDRAM byte reads, which return the odd byte in both lanes
+      wire [15:0] ss_rom_out = ROM_ADDR[0] && ~ROM_WORD ? {ss_rom_q[15:8], ss_rom_q[15:8]} : ss_rom_q;
+
+      assign ROM_Q = ROM_ADDR[23:16] == 8'hFF ? ss_rom_out : sdram_rom_q;
+    end else begin : gen_no_ss_rom
+      assign ROM_Q = sdram_rom_q;
+    end
+  endgenerate
 
   sdram sdram (
       .init(0),  //~clock_locked),
@@ -549,7 +648,7 @@ module MAIN_SNES (
 
       .addr0(cart_download ? ioctl_addr : ROM_ADDR),
       .din0 (cart_download ? ioctl_dout : ROM_D),
-      .dout0(ROM_Q),
+      .dout0(sdram_rom_q),
       .rd0  (~cart_download & (RESET_N ? ~ROM_OE_N : RFSH)),
       .wr0  (cart_download ? ioctl_wr : ~ROM_WE_N),
       .word0(cart_download | ROM_WORD),
@@ -563,14 +662,14 @@ module MAIN_SNES (
       .rfs1(1'b0),
       .word1(1'b0),
 
-      // SNI host access — unused
-      .sni_addr(25'b0),
-      .sni_din(16'b0),
-      .sni_dout(),
-      .sni_wr_req(1'b0),
-      .sni_rd_req(1'b0),
-      .sni_word(1'b0),
-      .sni_ready(),
+      // SNI host access — save state buffer (channel 1)
+      .sni_addr(ss_sni_addr),
+      .sni_din(ss_sni_din),
+      .sni_dout(ss_sni_dout),
+      .sni_wr_req(ss_sni_wr_req),
+      .sni_rd_req(ss_sni_rd_req),
+      .sni_word(ss_sni_word),
+      .sni_ready(ss_sni_ready),
 
       // Actual SDRAM interface
       .SDRAM_DQ(dram_dq),

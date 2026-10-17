@@ -326,6 +326,10 @@ module core_top (
     if (bridge_addr[31:28] == 4'h2) begin
       bridge_rd_data <= sd_read_data;
     end
+
+    if (bridge_addr[31:28] == 4'h4) begin
+      bridge_rd_data <= save_state_bridge_read_data;
+    end
   end
 
   always @(posedge clk_74a) begin
@@ -411,10 +415,12 @@ module core_top (
 
   wire dataslot_allcomplete;
 
-  wire savestate_supported = 0;
-  wire [31:0] savestate_addr;
-  wire [31:0] savestate_size;
-  wire [31:0] savestate_maxloadsize;
+  localparam SAVESTATE_SIZE = 32'h80000;
+
+  wire savestate_supported = 1;
+  wire [31:0] savestate_addr = 32'h40000000;
+  wire [31:0] savestate_size = SAVESTATE_SIZE;
+  wire [31:0] savestate_maxloadsize = SAVESTATE_SIZE;
 
   wire savestate_start;
   wire savestate_start_ack;
@@ -765,6 +771,59 @@ module core_top (
     rtc_time[7:0]  // Second
   };
 
+  // Save states
+
+  wire [31:0] save_state_bridge_read_data;
+
+  wire ss_save;
+  wire ss_load;
+  wire ss_busy;
+  wire ss_supported;
+
+  wire ss_host_req;
+  wire ss_host_we;
+  wire [19:1] ss_host_addr;
+  wire [15:0] ss_host_din;
+  wire [15:0] ss_host_dout;
+  wire ss_host_ack;
+
+  save_state_controller #(
+      .SIZE(SAVESTATE_SIZE)
+  ) save_state_controller (
+      .clk_74a(clk_74a),
+      .clk_mem(clk_mem_85_9),
+
+      .bridge_wr(bridge_wr),
+      .bridge_rd(bridge_rd),
+      .bridge_addr(bridge_addr),
+      .bridge_wr_data(bridge_wr_data),
+      .save_state_bridge_read_data(save_state_bridge_read_data),
+
+      .savestate_load(savestate_load),
+      .savestate_load_ack_s(savestate_load_ack),
+      .savestate_load_busy_s(savestate_load_busy),
+      .savestate_load_ok_s(savestate_load_ok),
+      .savestate_load_err_s(savestate_load_err),
+
+      .savestate_start(savestate_start),
+      .savestate_start_ack_s(savestate_start_ack),
+      .savestate_start_busy_s(savestate_start_busy),
+      .savestate_start_ok_s(savestate_start_ok),
+      .savestate_start_err_s(savestate_start_err),
+
+      .ss_save(ss_save),
+      .ss_load(ss_load),
+      .ss_busy(ss_busy),
+      .ss_supported(ss_supported),
+
+      .host_req(ss_host_req),
+      .host_we(ss_host_we),
+      .host_addr(ss_host_addr),
+      .host_din(ss_host_din),
+      .host_dout(ss_host_dout),
+      .host_ack(ss_host_ack)
+  );
+
   MAIN_SNES snes (
       .clk_mem_85_9 (clk_mem_85_9),
       .clk_sys_21_48(clk_sys_21_48),
@@ -861,6 +920,19 @@ module core_top (
       .sd_buff_dout(sd_buff_dout),
 
       .sram_size(sram_size),
+
+      // Save states
+      .ss_save(ss_save),
+      .ss_load(ss_load),
+      .ss_busy(ss_busy),
+      .ss_supported(ss_supported),
+
+      .ss_host_req(ss_host_req),
+      .ss_host_we(ss_host_we),
+      .ss_host_addr(ss_host_addr),
+      .ss_host_din(ss_host_din),
+      .ss_host_dout(ss_host_dout),
+      .ss_host_ack(ss_host_ack),
 
       // SDRAM
       .dram_a(dram_a),
