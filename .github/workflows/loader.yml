@@ -19,7 +19,7 @@ jobs:
       - name: Build bass
         run: |
           git clone https://github.com/ARM9/bass.git "$RUNNER_TEMP/bass"
-          git -C "$RUNNER_TEMP/bass" checkout 9ec2ecc2ed4615d88c1615d9550b6715478c5d34
+          git -C "$RUNNER_TEMP/bass" checkout 828ad2c11bddac45c7daeba9293a5265f2994bd5
           git -C "$RUNNER_TEMP/bass" log -1 --format=%H
           make -C "$RUNNER_TEMP/bass/bass" -j"$(nproc)" compiler="g++ -include stdexcept -include limits -include cstdint"
           git clone https://github.com/open-fpga/bass-chip32.git "$RUNNER_TEMP/bass-chip32"
