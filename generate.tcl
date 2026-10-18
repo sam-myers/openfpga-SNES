@@ -25,7 +25,7 @@ if { [lindex $argv 0] == "ntsc" } {
   set_parameter -name USE_SPC7110 -entity MAIN_SNES '0
   set_parameter -name USE_BSX -entity MAIN_SNES '0
   set_parameter -name USE_MSU -entity MAIN_SNES '0
-  set_parameter -name USE_SS -entity MAIN_SNES '1
+  set_parameter -name USE_SS -entity MAIN_SNES '0
 } elseif { [lindex $argv 0] == "pal" } {
   puts "PAL"
   set_parameter -name PAL_PLL -entity core_top '1
@@ -51,7 +51,7 @@ if { [lindex $argv 0] == "ntsc" } {
   set_parameter -name USE_SPC7110 -entity MAIN_SNES '0
   set_parameter -name USE_BSX -entity MAIN_SNES '0
   set_parameter -name USE_MSU -entity MAIN_SNES '0
-  set_parameter -name USE_SS -entity MAIN_SNES '1
+  set_parameter -name USE_SS -entity MAIN_SNES '0
 } elseif { [lindex $argv 0] == "ntsc_cx4" } {
   puts "NTSC CX4"
   set_parameter -name PAL_PLL -entity core_top '0
@@ -64,7 +64,7 @@ if { [lindex $argv 0] == "ntsc" } {
   set_parameter -name USE_SPC7110 -entity MAIN_SNES '0
   set_parameter -name USE_BSX -entity MAIN_SNES '0
   set_parameter -name USE_MSU -entity MAIN_SNES '0
-  set_parameter -name USE_SS -entity MAIN_SNES '1
+  set_parameter -name USE_SS -entity MAIN_SNES '0
 } elseif { [lindex $argv 0] == "ntsc_spc" } {
   puts "NTSC SPC"
   set_parameter -name PAL_PLL -entity core_top '0
