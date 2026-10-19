@@ -786,9 +786,11 @@ module core_top (
   wire [15:0] ss_host_din;
   wire [15:0] ss_host_dout;
   wire ss_host_ack;
+  wire [255:0] ss_debug;
 
   save_state_controller #(
-      .SIZE(SAVESTATE_SIZE)
+      .SIZE(SAVESTATE_SIZE),
+      .DEBUG(1)
   ) save_state_controller (
       .clk_74a(clk_74a),
       .clk_mem(clk_mem_85_9),
@@ -821,7 +823,9 @@ module core_top (
       .host_addr(ss_host_addr),
       .host_din(ss_host_din),
       .host_dout(ss_host_dout),
-      .host_ack(ss_host_ack)
+      .host_ack(ss_host_ack),
+
+      .core_debug(ss_debug)
   );
 
   MAIN_SNES snes (
@@ -933,6 +937,7 @@ module core_top (
       .ss_host_din(ss_host_din),
       .ss_host_dout(ss_host_dout),
       .ss_host_ack(ss_host_ack),
+      .ss_debug(ss_debug),
 
       // SDRAM
       .dram_a(dram_a),

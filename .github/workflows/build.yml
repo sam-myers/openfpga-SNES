@@ -11,6 +11,7 @@ on:
     branches:
       - master
       - savestates
+      - ss-debug
   pull_request:
 
 permissions:
@@ -23,7 +24,7 @@ jobs:
       matrix:
         # core: ["main", "pal", "spc", "sa1gsu", "pal_sa1gsu"]
         # TODO: Add SA1/GSU cores
-        core: ["main", "pal", "spc", "sa1", "cx4"]
+        core: ["main"]
       fail-fast: false
 
     steps:

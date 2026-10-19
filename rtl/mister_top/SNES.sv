@@ -111,6 +111,9 @@ module MAIN_SNES (
     output wire [15:0] ss_host_dout,
     output wire ss_host_ack,
 
+    // Save state debug (quasi-static, read once the engine is idle)
+    output wire [255:0] ss_debug,
+
     // SDRAM
     output wire [12:0] dram_a,
     output wire [ 1:0] dram_ba,
@@ -550,8 +553,39 @@ module MAIN_SNES (
       .sni_rd_req(ss_sni_rd_req),
       .sni_wr_req(ss_sni_wr_req),
       .sni_dout(ss_sni_dout),
-      .sni_ready(ss_sni_ready)
+      .sni_ready(ss_sni_ready),
+
+      .dbg_eng_ops(ss_dbg_eng_ops),
+      .dbg_eng_writes(ss_dbg_eng_writes),
+      .dbg_hdr0(ss_dbg_hdr0),
+      .dbg_hdr8(ss_dbg_hdr8)
   );
+
+  wire [31:0] ss_dbg_eng_ops;
+  wire [31:0] ss_dbg_eng_writes;
+  wire [63:0] ss_dbg_hdr0;
+  wire [63:0] ss_dbg_hdr8;
+
+  // Counts CPU reads of the savestate routine (ROM bank $FF)
+  reg [23:0] ss_dbg_rom_reads = 0;
+  reg prev_rom_oe_ff = 0;
+
+  always @(posedge clk_sys) begin
+    prev_rom_oe_ff <= ~ROM_OE_N && ROM_ADDR[23:16] == 8'hFF;
+
+    if (~ROM_OE_N && ROM_ADDR[23:16] == 8'hFF && ~prev_rom_oe_ff) ss_dbg_rom_reads <= ss_dbg_rom_reads + 24'h1;
+  end
+
+  assign ss_debug = {
+    ss_dbg_rom_reads,
+    38'h0,
+    ss_avail,
+    ss_busy,
+    ss_dbg_hdr8,
+    ss_dbg_hdr0,
+    ss_dbg_eng_writes,
+    ss_dbg_eng_ops
+  };
 
   wire reset = core_reset | cart_download | spc_download | bk_loading | clearing_ram | msu_data_download | parser_delay != 0;
 

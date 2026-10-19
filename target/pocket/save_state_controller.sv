@@ -13,7 +13,9 @@
 module save_state_controller #(
     // Bytes transferred to/from APF. A full snapshot (WRAM, VRAM, ARAM, 128KB BSRAM, registers) is under
     // 400KB
-    parameter SIZE = 32'h80000
+    parameter SIZE = 32'h80000,
+    // Diagnostic build: saves always report ok, and the last 16 words of every save are a debug block
+    parameter DEBUG = 0
 ) (
     input wire clk_74a,
     input wire clk_mem,
@@ -51,7 +53,10 @@ module save_state_controller #(
     output reg [19:1] host_addr = 0,
     output reg [15:0] host_din = 0,
     input wire [15:0] host_dout,
-    input wire host_ack
+    input wire host_ack,
+
+    // From MAIN_SNES, see SNES.sv
+    input wire [255:0] core_debug
 );
   localparam [17:0] SIZE_WORDS = SIZE / 4;
 
@@ -216,7 +221,18 @@ module save_state_controller #(
   wire [17:0] bridge_idx = bridge_addr[19:2];
 
   // APF may read the same word more than once, so hold the last popped word
-  assign save_state_bridge_read_data = bridge_idx == cur_idx ? cur_data : rd_fifo_q;
+  wire [31:0] stream_read_data = bridge_idx == cur_idx ? cur_data : rd_fifo_q;
+
+  // Debug block: the last 16 words of the transfer (the snapshot never gets that far)
+  reg [31:0] dbg_rd_edges = 0;
+  reg [31:0] dbg_rd_underflow = 0;
+  reg [31:0] dbg_rd_out_of_order = 0;
+  reg [31:0] dbg_rd_dup = 0;
+
+  wire [31:0] dbg_word[0:15];
+  wire dbg_sel = DEBUG && bridge_idx >= SIZE_WORDS - 18'd16;
+
+  assign save_state_bridge_read_data = dbg_sel ? dbg_word[bridge_idx[3:0]] : stream_read_data;
 
   always @(posedge clk_74a) begin
     prev_bridge_rd <= bridge_rd;
@@ -227,11 +243,26 @@ module save_state_controller #(
 
     if (prev_rd_epoch != rd_epoch_sync[2]) begin
       cur_idx <= 18'h3FFFF;
+
+      dbg_rd_edges <= 0;
+      dbg_rd_underflow <= 0;
+      dbg_rd_out_of_order <= 0;
+      dbg_rd_dup <= 0;
     end else if (~prev_bridge_rd && bridge_rd && bridge_ss_addr) begin
-      if (bridge_idx == cur_idx + 18'h1 && ~rd_fifo_empty) begin
-        cur_idx <= bridge_idx;
-        cur_data <= rd_fifo_q;
-        rd_fifo_rdreq <= 1;
+      dbg_rd_edges <= dbg_rd_edges + 32'h1;
+
+      if (bridge_idx == cur_idx + 18'h1) begin
+        if (~rd_fifo_empty) begin
+          cur_idx <= bridge_idx;
+          cur_data <= rd_fifo_q;
+          rd_fifo_rdreq <= 1;
+        end else begin
+          dbg_rd_underflow <= dbg_rd_underflow + 32'h1;
+        end
+      end else if (bridge_idx == cur_idx) begin
+        dbg_rd_dup <= dbg_rd_dup + 32'h1;
+      end else begin
+        dbg_rd_out_of_order <= dbg_rd_out_of_order + 32'h1;
       end
     end
   end
@@ -257,6 +288,9 @@ module save_state_controller #(
   reg [17:0] pf_idx = 0;
 
   wire seq_idle = seq_state == SEQ_IDLE;
+
+  // Bridge writes drained into SDRAM, ever
+  reg [31:0] dbg_wr_total = 0;
 
   task issue(input we, input [19:1] addr, input [15:0] data, input [2:0] ret);
     begin
@@ -293,6 +327,7 @@ module save_state_controller #(
         if (~wr_fifo_empty) begin
           wr_entry <= wr_fifo_q;
           wr_fifo_rdreq <= 1;
+          dbg_wr_total <= dbg_wr_total + 32'h1;
 
           seq_state <= SEQ_WRITE_LO;
         end else if (prefetch_en && ~prefetch_restart && pf_idx != SIZE_WORDS &&
@@ -339,6 +374,36 @@ module save_state_controller #(
   reg prev_load_s = 0;
   reg [27:0] timer = 0;
 
+  // Result codes: 1 ok, 2 unsupported, 3 timeout waiting for engine to start, 4 timeout waiting for
+  // engine to finish, 5 interrupted by load data, 6 write FIFO overflow
+  reg [7:0] dbg_save_result = 0;
+  reg [7:0] dbg_load_result = 0;
+  reg [7:0] dbg_saves = 0;
+  reg [7:0] dbg_loads = 0;
+  reg [27:0] dbg_save_t_start = 0;
+  reg [27:0] dbg_save_t_busy = 0;
+  reg [27:0] dbg_load_t_start = 0;
+  reg [27:0] dbg_load_t_busy = 0;
+  reg [31:0] dbg_load_words = 0;
+
+  // In DEBUG builds a failed save still streams out (with its debug block) instead of erroring
+  task save_failed(input [7:0] code);
+    begin
+      dbg_save_result <= code;
+      ss_save <= 0;
+
+      if (DEBUG) begin
+        timer <= 0;
+        rd_fifo_clr <= 1;
+        state <= SAVE_SETTLE;
+      end else begin
+        savestate_start_busy <= 0;
+        savestate_start_err <= 1;
+        state <= NONE;
+      end
+    end
+  endtask
+
   always @(posedge clk_mem) begin
     prev_start_s <= start_s;
     prev_load_s <= load_s;
@@ -368,13 +433,16 @@ module save_state_controller #(
       ss_load <= 0;
       timer <= 0;
 
+      dbg_saves <= dbg_saves + 8'h1;
+      dbg_save_result <= 0;
+      dbg_save_t_start <= 0;
+      dbg_save_t_busy <= 0;
+
       if (supported_s) begin
         ss_save <= 1;
         state <= SAVE_WAIT_START;
       end else begin
-        savestate_start_busy <= 0;
-        savestate_start_err <= 1;
-        state <= NONE;
+        save_failed(2);
       end
     end else if (load_s && ~prev_load_s) begin
       savestate_load_ack <= 1;
@@ -389,6 +457,11 @@ module save_state_controller #(
       ss_load <= 0;
       timer <= 0;
 
+      dbg_loads <= dbg_loads + 8'h1;
+      dbg_load_result <= 0;
+      dbg_load_t_start <= 0;
+      dbg_load_t_busy <= 0;
+
       state <= LOAD_DRAIN;
     end else begin
       case (state)
@@ -396,25 +469,23 @@ module save_state_controller #(
           if (busy_s) begin
             // Engine has latched the request
             ss_save <= 0;
+            dbg_save_t_start <= timer;
             timer <= 0;
             state <= SAVE_WAIT_END;
           end else if (timer == TIMEOUT) begin
-            ss_save <= 0;
-            savestate_start_busy <= 0;
-            savestate_start_err <= 1;
-            state <= NONE;
+            save_failed(3);
           end
         end
         SAVE_WAIT_END: begin
           if (~busy_s) begin
             // Let the final header write reach SDRAM before reading the buffer back
+            dbg_save_t_busy <= timer;
+            dbg_save_result <= 1;
             timer <= 0;
             rd_fifo_clr <= 1;
             state <= SAVE_SETTLE;
           end else if (timer == TIMEOUT) begin
-            savestate_start_busy <= 0;
-            savestate_start_err <= 1;
-            state <= NONE;
+            save_failed(4);
           end
         end
         SAVE_SETTLE: begin
@@ -433,6 +504,7 @@ module save_state_controller #(
             state <= NONE;
           end else if (~prefetch_en && ~prefetch_restart) begin
             // Load data arrived mid-save
+            dbg_save_result <= 5;
             savestate_start_busy <= 0;
             savestate_start_err <= 1;
             state <= NONE;
@@ -441,8 +513,10 @@ module save_state_controller #(
         LOAD_DRAIN: begin
           if (wr_fifo_empty && seq_idle) begin
             timer <= 0;
+            dbg_load_words <= dbg_wr_total;
 
             if (~supported_s || wr_overflow_sync[1]) begin
+              dbg_load_result <= ~supported_s ? 8'd2 : 8'd6;
               wr_overflow_clear <= 1;
               savestate_load_busy <= 0;
               savestate_load_err <= 1;
@@ -456,10 +530,12 @@ module save_state_controller #(
         LOAD_WAIT_START: begin
           if (busy_s) begin
             ss_load <= 0;
+            dbg_load_t_start <= timer;
             timer <= 0;
             state <= LOAD_WAIT_END;
           end else if (timer == TIMEOUT) begin
             // Engine rejected the state (bad header) or the game never hit NMI/IRQ
+            dbg_load_result <= 3;
             ss_load <= 0;
             savestate_load_busy <= 0;
             savestate_load_err <= 1;
@@ -468,10 +544,13 @@ module save_state_controller #(
         end
         LOAD_WAIT_END: begin
           if (~busy_s) begin
+            dbg_load_t_busy <= timer;
+            dbg_load_result <= 1;
             savestate_load_busy <= 0;
             savestate_load_ok <= 1;
             state <= NONE;
           end else if (timer == TIMEOUT) begin
+            dbg_load_result <= 4;
             savestate_load_busy <= 0;
             savestate_load_err <= 1;
             state <= NONE;
@@ -481,4 +560,25 @@ module save_state_controller #(
       endcase
     end
   end
+
+  ////////////////////////////////////////////////////////////////////////////////////////
+  // Debug block layout (little endian words as read back from the Memory file; each word is
+  // stored big endian in the file like the rest of the stream)
+
+  assign dbg_word[0] = 32'h44424731;  // "DBG1"
+  assign dbg_word[1] = {dbg_saves, dbg_save_result, dbg_loads, dbg_load_result};
+  assign dbg_word[2] = {4'h0, dbg_save_t_start};
+  assign dbg_word[3] = {4'h0, dbg_save_t_busy};
+  assign dbg_word[4] = {4'h0, dbg_load_t_start};
+  assign dbg_word[5] = {4'h0, dbg_load_t_busy};
+  assign dbg_word[6] = core_debug[31:0];  // engine DDR ops
+  assign dbg_word[7] = core_debug[63:32];  // engine DDR writes
+  assign dbg_word[8] = core_debug[95:64];  // header word 0 low (save count)
+  assign dbg_word[9] = core_debug[127:96];  // header word 0 high (size / 4)
+  assign dbg_word[10] = core_debug[159:128];  // header word 1 low ("SNES")
+  assign dbg_word[11] = {core_debug[255:232], 6'h0, core_debug[193:192]};  // ROM $FF reads, avail, busy
+  assign dbg_word[12] = dbg_rd_edges;
+  assign dbg_word[13] = {dbg_rd_underflow[15:0], dbg_rd_out_of_order[15:0]};
+  assign dbg_word[14] = {dbg_rd_dup[15:0], 14'h0, supported_s, wr_overflow_sync[1]};
+  assign dbg_word[15] = dbg_load_words;
 endmodule

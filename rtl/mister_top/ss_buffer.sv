@@ -40,7 +40,13 @@ module ss_buffer (
     output reg sni_rd_req = 0,
     output reg sni_wr_req = 0,
     input wire [15:0] sni_dout,
-    input wire sni_ready
+    input wire sni_ready,
+
+    // Debug counters (clk_mem). Only meaningful once the buffer is idle
+    output reg [31:0] dbg_eng_ops = 0,
+    output reg [31:0] dbg_eng_writes = 0,
+    output reg [63:0] dbg_hdr0 = 0,
+    output reg [63:0] dbg_hdr8 = 0
 );
   ////////////////////////////////////////////////////////////////////////////////////////
   // Engine request capture (clk_sys)
@@ -167,6 +173,13 @@ module ss_buffer (
       ENG_NEXT: begin
         if (word_idx == 2'd3) begin
           eng_done_toggle <= ~eng_done_toggle;
+
+          dbg_eng_ops <= dbg_eng_ops + 32'h1;
+          if (cap_we) begin
+            dbg_eng_writes <= dbg_eng_writes + 32'h1;
+            if (cap_addr == 0) dbg_hdr0 <= cap_do;
+          end
+          if (cap_addr == 19'h1) dbg_hdr8 <= cap_we ? cap_do : ddr_di;
 
           state <= IDLE;
         end else begin
