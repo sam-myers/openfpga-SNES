@@ -1010,6 +1010,14 @@ module core_top (
   wire [23:0] rgb_out;
   wire de_out;
 
+  // The PPU's RGB trails its HBLANK by one video clock, so without this the first pixel of each line
+  // shows the previous line's last pixel and the real last pixel is cut off
+  reg h_blank_d = 1;
+
+  always @(posedge clk_video_5_37) begin
+    h_blank_d <= h_blank;
+  end
+
   scanline_filler #(
       .SNAP_COUNT (2),
       .SNAP_POINTS('{240, 224}),
@@ -1021,7 +1029,7 @@ module core_top (
       .vsync_in(video_vs_snes),
 
       .vblank_in(v_blank),
-      .hblank_in(h_blank),
+      .hblank_in(h_blank_d),
       .rgb_in(video_rgb_snes),
 
       .hsync(video_hs),
