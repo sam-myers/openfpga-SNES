@@ -503,7 +503,9 @@ module core_top (
       .datatable_addr(datatable_addr),
       .datatable_wren(datatable_wren),
       .datatable_data(datatable_data),
-      .datatable_q   (datatable_q)
+      .datatable_q   (datatable_q),
+
+      .dbg_cmd_history(dbg_cmd_history)
   );
 
   reg ioctl_download = 0;
@@ -789,6 +791,8 @@ module core_top (
   wire [255:0] ss_debug;
   wire [63:0] ss_debug_live;
   wire [127:0] ss_controller_live;
+  wire [127:0] ss_controller_live_74;
+  wire [127:0] dbg_cmd_history;
 
   save_state_controller #(
       .SIZE(SAVESTATE_SIZE),
@@ -828,7 +832,8 @@ module core_top (
       .host_ack(ss_host_ack),
 
       .core_debug(ss_debug),
-      .live_debug(ss_controller_live)
+      .live_debug(ss_controller_live),
+      .live_debug_74(ss_controller_live_74)
   );
 
   MAIN_SNES snes (
@@ -1051,12 +1056,12 @@ module core_top (
 
   // DEBUG: save state status overlay. Top 32 lines, 8 rows of 64 bits, 8x4 pixel blocks, MSB first.
   // White = 1, dark blue = 0. Latched once per frame
-  reg [511:0] ov_bits = 0;
+  reg [767:0] ov_bits = 0;
   reg [9:0] ov_x = 0;
   reg [8:0] ov_y = 0;
 
-  wire ov_active = ov_y < 9'd32 && ov_x < 10'd512;
-  wire [8:0] ov_index = {ov_y[4:2], 6'd63 - ov_x[8:3]};
+  wire ov_active = ov_y < 9'd48 && ov_x < 10'd512;
+  wire [9:0] ov_index = {ov_y[5:2], 6'd63 - ov_x[8:3]};
 
   always @(posedge clk_video_5_37) begin
     prev_de <= de_out;
@@ -1069,6 +1074,8 @@ module core_top (
 
       ov_y <= 0;
       ov_bits <= {
+        dbg_cmd_history,
+        ss_controller_live_74,
         ss_debug[255:192],
         ss_debug[191:128],
         ss_debug[127:64],

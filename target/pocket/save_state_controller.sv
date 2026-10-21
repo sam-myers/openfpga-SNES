@@ -58,7 +58,9 @@ module save_state_controller #(
     // From MAIN_SNES, see SNES.sv
     input wire [255:0] core_debug,
     // Live status for the debug video overlay (clk_mem)
-    output wire [127:0] live_debug
+    output wire [127:0] live_debug,
+    // Bridge side live status (clk_74a)
+    output wire [127:0] live_debug_74
 );
   localparam [17:0] SIZE_WORDS = SIZE / 4;
 
@@ -232,6 +234,40 @@ module save_state_controller #(
   reg [31:0] dbg_rd_dup = 0;
 
   wire [31:0] dbg_word[0:15];
+
+  reg [31:0] dbg_wr_edges = 0;
+  reg [7:0] dbg_start_rises = 0;
+  reg [7:0] dbg_load_rises = 0;
+  reg [17:0] dbg_last_rd_idx = 0;
+  reg [17:0] dbg_max_rd_idx = 0;
+  reg prev_dbg_start = 0;
+  reg prev_dbg_load = 0;
+
+  always @(posedge clk_74a) begin
+    prev_dbg_start <= savestate_start;
+    prev_dbg_load <= savestate_load;
+
+    if (savestate_start && ~prev_dbg_start) dbg_start_rises <= dbg_start_rises + 8'h1;
+    if (savestate_load && ~prev_dbg_load) dbg_load_rises <= dbg_load_rises + 8'h1;
+
+    if (~prev_bridge_wr && bridge_wr && bridge_ss_addr) dbg_wr_edges <= dbg_wr_edges + 32'h1;
+
+    if (~prev_bridge_rd && bridge_rd && bridge_ss_addr) begin
+      dbg_last_rd_idx <= bridge_idx;
+      if (bridge_idx > dbg_max_rd_idx) dbg_max_rd_idx <= bridge_idx;
+    end
+  end
+
+  assign live_debug_74 = {
+    dbg_start_rises,
+    dbg_load_rises,
+    dbg_max_rd_idx,
+    dbg_last_rd_idx,
+    dbg_wr_edges[11:0],
+    dbg_rd_out_of_order[15:0],
+    dbg_rd_underflow[15:0],
+    dbg_rd_edges
+  };
   wire dbg_sel = DEBUG && bridge_idx >= SIZE_WORDS - 18'd16;
 
   assign save_state_bridge_read_data = dbg_sel ? dbg_word[bridge_idx[3:0]] : stream_read_data;

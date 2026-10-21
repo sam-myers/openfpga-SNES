@@ -95,7 +95,10 @@ input   wire    [31:0]  target_buffer_resp_struct,  // bus address of the memory
 input   wire    [9:0]   datatable_addr,
 input   wire            datatable_wren,
 input   wire    [31:0]  datatable_data,
-output  wire    [31:0]  datatable_q
+output  wire    [31:0]  datatable_q,
+
+// DEBUG: last 4 host commands, newest in [31:0]. Each {cmd, result code[7:0], host_20[0], repeats[6:0]}
+output  reg     [127:0] dbg_cmd_history = 0
 
 );
 
@@ -468,6 +471,18 @@ always @(posedge clk) begin
     end
     endcase
 
+
+    // DEBUG: record completed host commands, collapsing repeats
+    if(hstate == ST_DONE_OK || hstate == ST_DONE_CODE || hstate == ST_DONE_ERR) begin : dbg_record
+        reg [7:0] code;
+        code = hstate == ST_DONE_OK ? 8'h00 : hstate == ST_DONE_ERR ? 8'hFF : host_resultcode[7:0];
+
+        if(dbg_cmd_history[31:16] == host_cmd && dbg_cmd_history[15:8] == code && dbg_cmd_history[7] == host_20[0]) begin
+            if(~&dbg_cmd_history[6:0]) dbg_cmd_history[6:0] <= dbg_cmd_history[6:0] + 7'd1;
+        end else begin
+            dbg_cmd_history <= {dbg_cmd_history[95:0], host_cmd, code, host_20[0], 7'd1};
+        end
+    end
 
     // target > host command executer
     case(tstate)
