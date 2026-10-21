@@ -787,6 +787,8 @@ module core_top (
   wire [15:0] ss_host_dout;
   wire ss_host_ack;
   wire [255:0] ss_debug;
+  wire [63:0] ss_debug_live;
+  wire [127:0] ss_controller_live;
 
   save_state_controller #(
       .SIZE(SAVESTATE_SIZE),
@@ -825,7 +827,8 @@ module core_top (
       .host_dout(ss_host_dout),
       .host_ack(ss_host_ack),
 
-      .core_debug(ss_debug)
+      .core_debug(ss_debug),
+      .live_debug(ss_controller_live)
   );
 
   MAIN_SNES snes (
@@ -938,6 +941,7 @@ module core_top (
       .ss_host_dout(ss_host_dout),
       .ss_host_ack(ss_host_ack),
       .ss_debug(ss_debug),
+      .ss_debug_live(ss_debug_live),
 
       // SDRAM
       .dram_a(dram_a),
@@ -1045,6 +1049,15 @@ module core_top (
   reg prev_vs;
   reg [7:0] latched_snap_index;
 
+  // DEBUG: save state status overlay. Top 32 lines, 8 rows of 64 bits, 8x4 pixel blocks, MSB first.
+  // White = 1, dark blue = 0. Latched once per frame
+  reg [511:0] ov_bits = 0;
+  reg [9:0] ov_x = 0;
+  reg [8:0] ov_y = 0;
+
+  wire ov_active = ov_y < 9'd32 && ov_x < 10'd512;
+  wire [8:0] ov_index = {ov_y[4:2], 6'd63 - ov_x[8:3]};
+
   always @(posedge clk_video_5_37) begin
     prev_de <= de_out;
     prev_vs <= video_vs;
@@ -1053,14 +1066,31 @@ module core_top (
 
     if (video_vs && ~prev_vs) begin
       latched_snap_index <= snap_index;
+
+      ov_y <= 0;
+      ov_bits <= {
+        ss_debug[255:192],
+        ss_debug[191:128],
+        ss_debug[127:64],
+        ss_debug[63:0],
+        ss_debug_live,
+        ss_controller_live[127:64],
+        ss_controller_live[63:0],
+        64'hF0F0_CCCC_AAAA_FF00
+      };
     end
 
+    if (de_out) ov_x <= ov_x + 10'd1;
+
     if (~de_out && prev_de) begin
+      ov_x <= 0;
+      ov_y <= ov_y + 9'd1;
+
       // Write video slot
       rgb <= {9'b0, ~latched_snap_index[0], use_square_pixels_s, 10'b0, 3'b0};
     end else if (de_out) begin
       de  <= 1;
-      rgb <= rgb_out;
+      rgb <= ov_active ? (ov_bits[ov_index] ? 24'hFFFFFF : 24'h000080) : rgb_out;
     end
   end
 

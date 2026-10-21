@@ -113,6 +113,7 @@ module MAIN_SNES (
 
     // Save state debug (quasi-static, read once the engine is idle)
     output wire [255:0] ss_debug,
+    output wire [63:0] ss_debug_live,
 
     // SDRAM
     output wire [12:0] dram_a,
@@ -558,7 +559,8 @@ module MAIN_SNES (
       .dbg_eng_ops(ss_dbg_eng_ops),
       .dbg_eng_writes(ss_dbg_eng_writes),
       .dbg_hdr0(ss_dbg_hdr0),
-      .dbg_hdr8(ss_dbg_hdr8)
+      .dbg_hdr8(ss_dbg_hdr8),
+      .dbg_live(ss_debug_live)
   );
 
   wire [31:0] ss_dbg_eng_ops;

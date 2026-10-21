@@ -46,7 +46,9 @@ module ss_buffer (
     output reg [31:0] dbg_eng_ops = 0,
     output reg [31:0] dbg_eng_writes = 0,
     output reg [63:0] dbg_hdr0 = 0,
-    output reg [63:0] dbg_hdr8 = 0
+    output reg [63:0] dbg_hdr8 = 0,
+    // Live status (clk_mem)
+    output wire [63:0] dbg_live
 );
   ////////////////////////////////////////////////////////////////////////////////////////
   // Engine request capture (clk_sys)
@@ -108,10 +110,17 @@ module ss_buffer (
 
   wire [1:0] word_be = cap_be[word_idx*2+:2];
 
+  reg [23:0] dbg_sni_issued = 0;
+  reg [23:0] dbg_sni_done = 0;
+
+  assign dbg_live = {dbg_sni_done, dbg_sni_issued, 5'h0, is_eng, sni_ready, eng_pending, host_pending, state};
+
   always @(posedge clk_mem) begin
     sni_rd_req <= 0;
     sni_wr_req <= 0;
     host_ack   <= 0;
+
+    if (sni_rd_req || sni_wr_req) dbg_sni_issued <= dbg_sni_issued + 24'h1;
 
     if (host_req) begin
       host_pending <= 1;
@@ -194,6 +203,8 @@ module ss_buffer (
       end
       WAIT_READY: begin
         if (sni_ready) begin
+          dbg_sni_done <= dbg_sni_done + 24'h1;
+
           if (is_eng) begin
             if (~cap_we) ddr_di[word_idx*16+:16] <= sni_dout;
 

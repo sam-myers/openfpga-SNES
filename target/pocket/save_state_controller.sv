@@ -56,7 +56,9 @@ module save_state_controller #(
     input wire host_ack,
 
     // From MAIN_SNES, see SNES.sv
-    input wire [255:0] core_debug
+    input wire [255:0] core_debug,
+    // Live status for the debug video overlay (clk_mem)
+    output wire [127:0] live_debug
 );
   localparam [17:0] SIZE_WORDS = SIZE / 4;
 
@@ -291,6 +293,7 @@ module save_state_controller #(
 
   // Bridge writes drained into SDRAM, ever
   reg [31:0] dbg_wr_total = 0;
+  reg [20:0] dbg_host_acks = 0;
 
   task issue(input we, input [19:1] addr, input [15:0] data, input [2:0] ret);
     begin
@@ -350,7 +353,10 @@ module save_state_controller #(
         seq_state <= SEQ_IDLE;
       end
       SEQ_WAIT: begin
-        if (host_ack) seq_state <= seq_return;
+        if (host_ack) begin
+          seq_state <= seq_return;
+          dbg_host_acks <= dbg_host_acks + 21'h1;
+        end
       end
       default: seq_state <= SEQ_IDLE;
     endcase
@@ -564,6 +570,35 @@ module save_state_controller #(
   ////////////////////////////////////////////////////////////////////////////////////////
   // Debug block layout (little endian words as read back from the Memory file; each word is
   // stored big endian in the file like the rest of the stream)
+
+  assign live_debug = {
+    12'h0,
+    timer,
+    dbg_host_acks,
+    rd_fifo_wrusedw,
+    pf_idx,
+    dbg_save_result,
+    dbg_saves,
+    wr_fifo_empty,
+    rd_fifo_wrfull,
+    ss_load,
+    ss_save,
+    savestate_load_ack,
+    savestate_load_busy,
+    savestate_load_ok,
+    savestate_load_err,
+    savestate_start_ack,
+    savestate_start_busy,
+    savestate_start_ok,
+    savestate_start_err,
+    supported_s,
+    busy_s,
+    load_s,
+    start_s,
+    prefetch_en,
+    seq_state,
+    state
+  };
 
   assign dbg_word[0] = 32'h44424731;  // "DBG1"
   assign dbg_word[1] = {dbg_saves, dbg_save_result, dbg_loads, dbg_load_result};
